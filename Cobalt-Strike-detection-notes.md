@@ -15,7 +15,7 @@ https://github.com/BinaryDefense/ThreatHuntingJupyterNotebooks
 https://www.activecountermeasures.com/free-tools/rita/
 - Note: RITA requires Zeek logs
 
-### KQL Query for Hunting in Sysmon
+### KQL Query for Hunting in Sysmon using Sentinel
 
 
         let starttime = 48h; // Go back as many days as you want to look
@@ -45,7 +45,34 @@ https://www.activecountermeasures.com/free-tools/rita/
         | where Duration >= DurationThreshold
         | order by StandardDeviation asc
 
+
+
 ### KQL Query for Hunting in Microsoft Defender for Endpoint
+
+
+        let TimeDeltaThreshold = 2; // don't count connections less than this many seconds after the last connection to the same IP
+        let TotalEventsThreshold = 15; // only show beaconing that had at least this many connections
+        let DurationThreshold = 1200; // only show beaconing that lasted at least this many seconds
+        let StandardDeviationThreshold = 100; // Set to filter out false positives: lower number is tighter filtering/fewer results
+        DeviceNetworkEvents
+        | where RemoteIPType !in ("Reserved", "Private", "LinkLocal", "Loopback")
+        | where ActionType in ("ConnectionSuccess", "ConnectionRequest", "ConnectionFailed")
+        | project Timestamp, DeviceId, DeviceName, InitiatingProcessFileName, LocalIP, LocalPort, RemoteIP, RemotePort
+        | sort by LocalIP asc, RemoteIP asc, Timestamp asc
+        | serialize 
+        | extend nextTimeGenerated = next(Timestamp, 1), nextDeviceId = next(DeviceId, 1), nextRemoteIP = next(RemoteIP, 1)
+        | extend TimeDeltaInSeconds = datetime_diff("second", nextTimeGenerated, Timestamp)
+        | where DeviceId == nextDeviceId and RemoteIP == nextRemoteIP
+        | where TimeDeltaInSeconds > TimeDeltaThreshold
+        | project Timestamp, TimeDeltaInSeconds, DeviceName, InitiatingProcessFileName, LocalIP, LocalPort, RemoteIP, RemotePort
+        | summarize avg(TimeDeltaInSeconds), count(), min(Timestamp), max(Timestamp), Duration=datetime_diff("second", max(Timestamp), min(Timestamp)), StandardDeviation=stdev(TimeDeltaInSeconds), TimeDeltaList=make_list(TimeDeltaInSeconds) by DeviceName, LocalIP, RemoteIP, InitiatingProcessFileName
+        | where count_ > TotalEventsThreshold 
+        | where StandardDeviation < StandardDeviationThreshold
+        | where Duration >= DurationThreshold
+        | order by StandardDeviation asc
+
+
+### KQL Query for Hunting in Sentinel using Defender for Endpoint Records
 
 
         let starttime = 2d; // Go back as many days as you want to look
